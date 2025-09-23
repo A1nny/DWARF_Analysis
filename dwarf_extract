@@ -1,0 +1,89 @@
+from elftools.elf.elffile import ELFFile
+from elftools.dwarf.descriptions import describe_DWARF_expr
+
+
+function_list=[]
+
+
+# 1. 打开 ELF 文件
+with open('./build_gcc/sm4.o', 'rb') as f:
+    # 2. 创建 ELFFile 对象
+    elffile = ELFFile(f)
+    
+    # 3. 检查文件是否有 DWARF 信息
+    if not elffile.has_dwarf_info():
+        print('File has no DWARF info')
+        exit(1)
+    
+    # 4. 获取 dwarfinfo 对象！
+    dwarfinfo = elffile.get_dwarf_info()
+    
+    line_programs = {}
+    for CU in dwarfinfo.iter_CUs():
+        line_programs[CU] = dwarfinfo.line_program_for_CU(CU)
+
+
+
+
+
+    for CU in dwarfinfo.iter_CUs():
+
+        # 遍历该 CU 中的所有 DIE
+        # if line_programs[CU]:
+        #         for entry in line_programs[CU].get_entries():
+        #             if entry.state is None:
+        #                 continue
+        #             print(f"Addr: 0x{entry.state.address:08x} => File: {entry.state.file}, Line: {entry.state.line}")
+        for DIE in CU.iter_DIEs():
+            # 打印所有 DIE 的标签类型
+            
+            if DIE.tag=='DW_TAG_subprogram':
+                line_program=line_programs[CU]
+                file_entries = line_program['file_entry'] if line_program else []
+
+
+                name_attr=DIE.attributes.get('DW_AT_name', None)
+                low_pc_attr=DIE.attributes.get('DW_AT_low_pc', None)
+                high_pc_attr=DIE.attributes.get('DW_AT_high_pc', None)
+                decl_file_attr=DIE.attributes.get('DW_AT_decl_file', None)
+                if not all([name_attr, low_pc_attr, high_pc_attr]):
+                    continue 
+                name = name_attr.value.decode('utf-8') if name_attr else '<unknown>'
+                low_pc = low_pc_attr.value
+                high_pc = high_pc_attr.value
+                # print(f"{low_pc:x},{high_pc:x}")
+                start_addr = low_pc
+                end_addr = low_pc + high_pc
+
+
+                decl_file_index = decl_file_attr.value if decl_file_attr else None
+                file_name = f"Unknown file ({decl_file_index})"
+                # print(DIE.attributes)
+
+
+                if decl_file_index and line_program and 0 < decl_file_index <= len(file_entries):
+                    file_entry = file_entries[decl_file_index - 1]
+                    file_name = file_entry.name.decode('utf-8')
+                    print(file_name)
+
+                for entry in line_programs[CU].get_entries():
+                    if entry.state is None:
+                        continue
+                    if entry.state.address==start_addr:
+                        start_line=entry.state.line
+                        start_file=entry.state.file
+                    if entry.state.address==end_addr:
+                        end_line=entry.state.line
+                        end_file=entry.state.file
+                func_info = {
+                    'name': name,
+                    'start_addr': f"0x{start_addr:08x}",
+                    'start_line':start_line,
+                    'start_file':start_file,
+                    'end_addr': f"0x{end_addr:08x}",
+                    'end_line':end_line,
+                    'end_file':end_file,
+                    'decl_file': file_name
+                }
+                function_list.append(func_info)
+                print(func_info)
