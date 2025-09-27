@@ -1,89 +1,155 @@
 from elftools.elf.elffile import ELFFile
 from elftools.dwarf.descriptions import describe_DWARF_expr
-
-
+import sys
+import os
+import json
 function_list=[]
+# input_directory = sys.argv[1]
+# output_file_path = sys.argv[2]
+# version=sys.argv[4]
+# compiler=sys.argv[3]
 
+
+def process_subprogram(DIE,line_program,comp_dir,text_data,text_start):
+    
+    file_entries = line_program['file_entry'] if line_program else []
+    name_attr=DIE.attributes.get('DW_AT_name', None)
+    low_pc_attr=DIE.attributes.get('DW_AT_low_pc', None)
+    high_pc_attr=DIE.attributes.get('DW_AT_high_pc', None)
+    decl_file_attr=DIE.attributes.get('DW_AT_decl_file', None)
+
+#get name, start_addr end_addr
+    if not all([name_attr, low_pc_attr, high_pc_attr]):
+        return 
+    name = name_attr.value.decode('utf-8') if name_attr else '<unknown>'
+    low_pc = low_pc_attr.value
+    high_pc = high_pc_attr.value
+    start_addr = low_pc
+    end_addr = low_pc + high_pc
+
+#file_name_get
+    decl_file_index = decl_file_attr.value if decl_file_attr else None
+    file_name = f"Unknown file ({decl_file_index})"
+    if decl_file_index and line_program and 0 < decl_file_index <= len(file_entries):
+        file_entry = file_entries[decl_file_index - 1]
+        file_name = file_entry.name.decode('utf-8')
+    
+
+
+#code_line_get
+    last_addr=0
+    pad_tag=1
+    for entry in line_programs[CU].get_entries():
+        if entry.state is None:
+            continue
+        if start_addr <= entry.state.address <= end_addr:
+            if entry.state.address==start_addr:
+                start_line=entry.state.line
+            if last_addr==0 or entry.state.address > last_addr:
+                last_addr = entry.state.address
+                end_line=entry.state.line
+            if end_addr==entry.state.address:
+                pad_tag=0
+
+#text_get
+    start_offset = start_addr - text_start
+    end_offset = end_addr - text_start
+    bin_text=text_data[start_offset:end_offset]
+    # print(f"0x{end_addr:08x}")
+    # print(f"0x{start_addr:08x}")
+    # print(str(bin_text))
+
+
+#code_get
+    # print(file_entry.dir_index)
+    if hasattr(file_entry, 'dir_index') and file_entry.dir_index > 0:
+        if hasattr(line_program.header, 'include_directory'):
+            include_dirs = line_program.header.include_directory
+            if 0 < file_entry.dir_index <= len(include_dirs):
+                # 获取目录路径
+                dir_path = include_dirs[file_entry.dir_index].decode('utf-8')
+                # print(dir_path)
+    code_path=os.path.join(comp_dir,dir_path,file_name)
+    # print(code_path)
+    with open(code_path, 'r', encoding='utf-8') as f:
+        lines = f.readlines()
+        
+        # 调整行号索引
+        start_idx = max(0, start_line - 1)
+        end_idx = min(len(lines), end_line)
+        
+        # 提取代码片段
+        code=''.join(lines[start_idx:end_idx])
+        # print(type(code))
+
+
+    func_info = {
+        'func_name': name,
+        'start_addr': f"0x{start_addr:08x}",
+        'start_line':start_line,
+        'end_addr': f"0x{end_addr:08x}",
+        'end_line':end_line,
+        'offset':end_addr-start_addr,
+        'decl_file': file_name,
+        'compiler':'gcc',
+        'version':'1.1.1w',
+        'if_linked':1,    #whether linked (in this code this line can't be operated)
+        'if_padded':pad_tag,
+        'src_code_frag':code,
+        'bin_code_frag':str(bin_text),
+        'route':code_path
+    }
+    return func_info
+
+    
 
 # 1. 打开 ELF 文件
-with open('./build_gcc/sm4.o', 'rb') as f:
-    # 2. 创建 ELFFile 对象
-    elffile = ELFFile(f)
-    
-    # 3. 检查文件是否有 DWARF 信息
-    if not elffile.has_dwarf_info():
-        print('File has no DWARF info')
-        exit(1)
-    
-    # 4. 获取 dwarfinfo 对象！
-    dwarfinfo = elffile.get_dwarf_info()
-    
-    line_programs = {}
-    for CU in dwarfinfo.iter_CUs():
-        line_programs[CU] = dwarfinfo.line_program_for_CU(CU)
+for root, dirs, files in os.walk("/home/ainny/Desktop/project/1.1.1/build_gcc/all"):
+        for file in files:
+            if file.endswith('.o'):
+                file_path = os.path.join(root, file)
+                with open("/home/ainny/Desktop/project/1.1.1/build_gcc/all/sm4.o", 'rb') as f:
+
+                    # 2. 创建 ELFFile 对象
+                    elffile = ELFFile(f)
+                    # 3. 检查文件是否有 DWARF 信息
+                    if not elffile.has_dwarf_info():
+                        print('File has no DWARF info')
+                        exit(1)
+                    
+                    # 4. 获取 dwarfinfo 对象！
+                    dwarfinfo = elffile.get_dwarf_info()
+
+
+                    text_section = elffile.get_section_by_name('.text')
+                    text_data = text_section.data()
+                    text_start = text_section['sh_addr']
+                    
+
+
+                    line_programs = {}
+                    for CU in dwarfinfo.iter_CUs():
+                        line_programs[CU] = dwarfinfo.line_program_for_CU(CU)
+
+                    for CU in dwarfinfo.iter_CUs():
+                        top_die = CU.get_top_DIE()
+                        comp_dir_attr = top_die.attributes.get('DW_AT_comp_dir', None)
+                        comp_dir = comp_dir_attr.value.decode('utf-8') if comp_dir_attr else ''
+                        # print(comp_dir)
+                        for DIE in CU.iter_DIEs():
+                            
+                                # print()
+                            if DIE.tag=='DW_TAG_subprogram':
+                                line_program=line_programs[CU]
+                                if process_subprogram(DIE,line_program,comp_dir,text_data,text_start):
+                                    func_info=process_subprogram(DIE,line_program,comp_dir,text_data,text_start)
+                                    function_list.append(func_info)
+                                    print(func_info)
+                break  
+
+
+            with open('./sm4.json','w') as file:
+                json.dump(function_list, file, ensure_ascii=False, indent=2)
 
 
 
-
-
-    for CU in dwarfinfo.iter_CUs():
-
-        # 遍历该 CU 中的所有 DIE
-        # if line_programs[CU]:
-        #         for entry in line_programs[CU].get_entries():
-        #             if entry.state is None:
-        #                 continue
-        #             print(f"Addr: 0x{entry.state.address:08x} => File: {entry.state.file}, Line: {entry.state.line}")
-        for DIE in CU.iter_DIEs():
-            # 打印所有 DIE 的标签类型
-            
-            if DIE.tag=='DW_TAG_subprogram':
-                line_program=line_programs[CU]
-                file_entries = line_program['file_entry'] if line_program else []
-
-
-                name_attr=DIE.attributes.get('DW_AT_name', None)
-                low_pc_attr=DIE.attributes.get('DW_AT_low_pc', None)
-                high_pc_attr=DIE.attributes.get('DW_AT_high_pc', None)
-                decl_file_attr=DIE.attributes.get('DW_AT_decl_file', None)
-                if not all([name_attr, low_pc_attr, high_pc_attr]):
-                    continue 
-                name = name_attr.value.decode('utf-8') if name_attr else '<unknown>'
-                low_pc = low_pc_attr.value
-                high_pc = high_pc_attr.value
-                # print(f"{low_pc:x},{high_pc:x}")
-                start_addr = low_pc
-                end_addr = low_pc + high_pc
-
-
-                decl_file_index = decl_file_attr.value if decl_file_attr else None
-                file_name = f"Unknown file ({decl_file_index})"
-                # print(DIE.attributes)
-
-
-                if decl_file_index and line_program and 0 < decl_file_index <= len(file_entries):
-                    file_entry = file_entries[decl_file_index - 1]
-                    file_name = file_entry.name.decode('utf-8')
-                    print(file_name)
-
-                for entry in line_programs[CU].get_entries():
-                    if entry.state is None:
-                        continue
-                    if entry.state.address==start_addr:
-                        start_line=entry.state.line
-                        start_file=entry.state.file
-                    if entry.state.address==end_addr:
-                        end_line=entry.state.line
-                        end_file=entry.state.file
-                func_info = {
-                    'name': name,
-                    'start_addr': f"0x{start_addr:08x}",
-                    'start_line':start_line,
-                    'start_file':start_file,
-                    'end_addr': f"0x{end_addr:08x}",
-                    'end_line':end_line,
-                    'end_file':end_file,
-                    'decl_file': file_name
-                }
-                function_list.append(func_info)
-                print(func_info)
