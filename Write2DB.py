@@ -24,12 +24,13 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# 抑制 cryptography 关于 Blowfish 的弃用警告
+# 抑制 cryptography 关于 Blowfish 的弃用警告  
 warnings.filterwarnings('ignore', message='.*Blowfish has been deprecated.*')
 
 # 常量配置
 BATCH_SIZE = 1000
-JSON_ROOT_FOLDER = 'D:/data2sql/json'
+JSON_ROOT_FOLDER = '/home/user/Desktop/project/json'
+
 
 def connect_to_database(ssh_host_port, ssh_username, ssh_pkey_path, remote_bind_address, db_user, db_password, db_name, ssh_pkey_passphrase):
     ssh_host, ssh_port = ssh_host_port.split(':')
@@ -107,10 +108,10 @@ def process_json_files(
     """处理所有 JSON 文件并批量插入数据库"""
     insert_sql = """
         INSERT INTO DWARF_INFO (
-            No, func_name, start_addr, start_line, end_addr, end_line,
+            func_name, start_addr, start_line, end_addr, end_line,
             _offset, decl_file, compiler, version, _optimize, if_padded,
             assembly_code, src_code_frag, route, Conf_pair_id
-        ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+        ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
     """
     
     buffer = []
@@ -162,7 +163,6 @@ def process_json_files(
                     
                     # 构建记录
                     buffer.append((
-                        record_no,
                         item['func_name'],
                         item['start_addr'],
                         item['start_line'],
